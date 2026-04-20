@@ -55,135 +55,6 @@ const GENRE_NAME_BY_ID = Object.fromEntries(
   Object.entries(TMDB_GENRE_IDS).map(([name, id]) => [id, name])
 );
 
-/* =============================================================================
-   FILM_CATALOG — curated starter catalog, filtered client-side.
-   Dynamic discovery via external APIs proved unreliable in the artifact
-   sandbox, so the app ships with a hand-picked cinephile catalog.
-   ============================================================================= */
-
-const FILM_CATALOG = [
-  { title: 'Stalker', director: 'Andrei Tarkovsky', year: 1979, runtime: 162,
-    genres: ['Drama', 'Sci-Fi'], synopsis: 'A guide leads two men through the Zone, a mysterious restricted area where physical laws warp.',
-    imdbRating: 8.1, imdbVotes: 184000, budget: 1000000 },
-  { title: '2001: A Space Odyssey', director: 'Stanley Kubrick', year: 1968, runtime: 149,
-    genres: ['Sci-Fi'], synopsis: 'Humanity encounters a mysterious monolith that propels us from primate origins toward an unknown cosmic destiny.',
-    imdbRating: 8.3, imdbVotes: 700000, budget: 12000000 },
-  { title: 'The Godfather', director: 'Francis Ford Coppola', year: 1972, runtime: 175,
-    genres: ['Crime', 'Drama'], synopsis: 'The aging patriarch of an organized crime dynasty transfers control to his reluctant son.',
-    imdbRating: 9.2, imdbVotes: 1900000, budget: 6000000 },
-  { title: 'Chinatown', director: 'Roman Polanski', year: 1974, runtime: 130,
-    genres: ['Drama', 'Mystery', 'Thriller'], synopsis: 'A Los Angeles private eye takes a simple job and unearths a scandal at the heart of the city.',
-    imdbRating: 8.1, imdbVotes: 320000, budget: 6000000 },
-  { title: 'Heat', director: 'Michael Mann', year: 1995, runtime: 170,
-    genres: ['Crime', 'Drama', 'Thriller'], synopsis: 'A disciplined thief and the obsessive detective hunting him find unexpected kinship in their mirror-image lives.',
-    imdbRating: 8.3, imdbVotes: 725000, budget: 60000000 },
-  { title: 'No Country for Old Men', director: 'Joel & Ethan Coen', year: 2007, runtime: 122,
-    genres: ['Crime', 'Thriller'], synopsis: 'A hunter stumbles on drug money in the Texas desert and becomes prey for an implacable killer.',
-    imdbRating: 8.2, imdbVotes: 1100000, budget: 25000000 },
-  { title: 'There Will Be Blood', director: 'Paul Thomas Anderson', year: 2007, runtime: 158,
-    genres: ['Drama'], synopsis: 'An oil prospector in turn-of-the-century California accumulates wealth at the cost of everything else.',
-    imdbRating: 8.2, imdbVotes: 645000, budget: 25000000 },
-  { title: 'In the Mood for Love', director: 'Wong Kar-wai', year: 2000, runtime: 98,
-    genres: ['Drama', 'Romance'], synopsis: 'Two Hong Kong neighbors discover their spouses are having an affair, and begin an intimate restraint of their own.',
-    imdbRating: 8.1, imdbVotes: 185000, budget: null },
-  { title: 'Parasite', director: 'Bong Joon-ho', year: 2019, runtime: 132,
-    genres: ['Drama', 'Thriller'], synopsis: 'A poor family schemes its way into working for a wealthy Seoul household, with consequences that escalate past control.',
-    imdbRating: 8.5, imdbVotes: 920000, budget: 11000000 },
-  { title: 'Mulholland Drive', director: 'David Lynch', year: 2001, runtime: 147,
-    genres: ['Drama', 'Mystery', 'Thriller'], synopsis: 'An amnesiac woman and an aspiring actress navigate a Los Angeles that refuses to stay coherent.',
-    imdbRating: 7.9, imdbVotes: 400000, budget: 15000000 },
-  { title: 'Blade Runner 2049', director: 'Denis Villeneuve', year: 2017, runtime: 164,
-    genres: ['Drama', 'Sci-Fi'], synopsis: 'A new replicant blade runner uncovers a buried secret that could shatter what remains of society.',
-    imdbRating: 8.0, imdbVotes: 650000, budget: 150000000 },
-  { title: 'Under the Skin', director: 'Jonathan Glazer', year: 2013, runtime: 108,
-    genres: ['Horror', 'Sci-Fi'], synopsis: 'An alien takes the form of a woman and drives through Scotland observing human life with cold curiosity.',
-    imdbRating: 6.3, imdbVotes: 190000, budget: 13300000 },
-  { title: 'Uncut Gems', director: 'Safdie Brothers', year: 2019, runtime: 135,
-    genres: ['Crime', 'Thriller'], synopsis: 'A New York jeweler with a gambling addiction makes a high-stakes bet that could change his life or destroy it.',
-    imdbRating: 7.4, imdbVotes: 220000, budget: 19000000 },
-  { title: 'Portrait of a Lady on Fire', director: 'Céline Sciamma', year: 2019, runtime: 122,
-    genres: ['Drama', 'Romance'], synopsis: 'A painter is commissioned to secretly paint the portrait of a reluctant bride in 18th-century Brittany.',
-    imdbRating: 8.1, imdbVotes: 100000, budget: 5000000 },
-  { title: 'The Lighthouse', director: 'Robert Eggers', year: 2019, runtime: 109,
-    genres: ['Drama', 'Horror'], synopsis: 'Two lighthouse keepers on a remote New England island descend into paranoia and mutual loathing.',
-    imdbRating: 7.4, imdbVotes: 250000, budget: 11000000 },
-  { title: 'Hereditary', director: 'Ari Aster', year: 2018, runtime: 127,
-    genres: ['Horror'], synopsis: 'After her secretive mother dies, a woman discovers unsettling things about her ancestry and her family\'s fate.',
-    imdbRating: 7.3, imdbVotes: 380000, budget: 10000000 },
-  { title: 'Past Lives', director: 'Celine Song', year: 2023, runtime: 105,
-    genres: ['Drama', 'Romance'], synopsis: 'Two childhood friends reunite in New York two decades after one emigrated from Korea.',
-    imdbRating: 7.8, imdbVotes: 80000, budget: 12000000 },
-  { title: 'Everything Everywhere All at Once', director: 'Daniels', year: 2022, runtime: 139,
-    genres: ['Comedy', 'Sci-Fi'], synopsis: 'A struggling laundromat owner discovers she must connect to parallel versions of herself to save the multiverse.',
-    imdbRating: 7.8, imdbVotes: 640000, budget: 25000000 },
-  { title: 'Oppenheimer', director: 'Christopher Nolan', year: 2023, runtime: 180,
-    genres: ['Drama'], synopsis: 'The architect of the atomic bomb reckons with what he has unleashed as the world moves into a new era.',
-    imdbRating: 8.3, imdbVotes: 800000, budget: 100000000 },
-  { title: 'Aftersun', director: 'Charlotte Wells', year: 2022, runtime: 102,
-    genres: ['Drama'], synopsis: 'A woman looks back on a Turkish holiday with her young father, grasping at what she couldn\'t see then.',
-    imdbRating: 7.6, imdbVotes: 90000, budget: 2000000 },
-  { title: 'Tár', director: 'Todd Field', year: 2022, runtime: 158,
-    genres: ['Drama'], synopsis: 'A renowned conductor at the peak of her career begins a slow-motion unraveling of her own making.',
-    imdbRating: 7.4, imdbVotes: 105000, budget: 35000000 },
-  { title: 'Drive My Car', director: 'Ryusuke Hamaguchi', year: 2021, runtime: 179,
-    genres: ['Drama'], synopsis: 'A grieving actor directing Uncle Vanya in Hiroshima is paired with a quiet young woman as his chauffeur.',
-    imdbRating: 7.6, imdbVotes: 75000, budget: 2000000 },
-  { title: 'Moonlight', director: 'Barry Jenkins', year: 2016, runtime: 111,
-    genres: ['Drama'], synopsis: 'A young Black man comes of age across three chapters of his life in Miami.',
-    imdbRating: 7.4, imdbVotes: 340000, budget: 1500000 },
-  { title: 'Arrival', director: 'Denis Villeneuve', year: 2016, runtime: 116,
-    genres: ['Drama', 'Sci-Fi'], synopsis: 'A linguist is recruited to decipher communications from mysterious spacecraft that have appeared across the Earth.',
-    imdbRating: 7.9, imdbVotes: 790000, budget: 47000000 },
-  { title: 'The Grand Budapest Hotel', director: 'Wes Anderson', year: 2014, runtime: 99,
-    genres: ['Comedy'], synopsis: 'A legendary concierge and his young protégé are caught up in the theft of a priceless Renaissance painting.',
-    imdbRating: 8.1, imdbVotes: 880000, budget: 30000000 },
-  { title: 'Spirited Away', director: 'Hayao Miyazaki', year: 2001, runtime: 125,
-    genres: ['Animation', 'Fantasy'], synopsis: 'A young girl stumbles into a world of spirits and must work in a bathhouse to save her transformed parents.',
-    imdbRating: 8.6, imdbVotes: 820000, budget: 19000000 },
-  { title: 'Seven Samurai', director: 'Akira Kurosawa', year: 1954, runtime: 207,
-    genres: ['Action', 'Drama'], synopsis: 'A poor village hires seven masterless samurai to defend them from marauding bandits.',
-    imdbRating: 8.6, imdbVotes: 380000, budget: null },
-  { title: 'Blade Runner', director: 'Ridley Scott', year: 1982, runtime: 117,
-    genres: ['Sci-Fi', 'Thriller'], synopsis: 'A reluctant detective in a neon-drenched future hunts escaped replicants who want more life.',
-    imdbRating: 8.1, imdbVotes: 830000, budget: 28000000 },
-  { title: 'Goodfellas', director: 'Martin Scorsese', year: 1990, runtime: 146,
-    genres: ['Crime', 'Drama'], synopsis: 'The story of Henry Hill\'s rise and fall through the ranks of the New York mob.',
-    imdbRating: 8.7, imdbVotes: 1200000, budget: 25000000 },
-  { title: 'Decision to Leave', director: 'Park Chan-wook', year: 2022, runtime: 139,
-    genres: ['Mystery', 'Romance', 'Thriller'], synopsis: 'A Seoul detective investigating a death becomes dangerously entangled with the dead man\'s wife.',
-    imdbRating: 7.2, imdbVotes: 80000, budget: null },
-  { title: 'The Zone of Interest', director: 'Jonathan Glazer', year: 2023, runtime: 106,
-    genres: ['Drama', 'War'], synopsis: 'A Nazi commandant and his wife build an idyllic life next to Auschwitz, just beyond the wall.',
-    imdbRating: 7.4, imdbVotes: 85000, budget: 15000000 },
-  { title: 'Anatomy of a Fall', director: 'Justine Triet', year: 2023, runtime: 152,
-    genres: ['Drama', 'Mystery', 'Thriller'], synopsis: 'A novelist stands trial for her husband\'s death, with their blind son as the only witness.',
-    imdbRating: 7.7, imdbVotes: 130000, budget: 6300000 },
-  { title: 'Apocalypse Now', director: 'Francis Ford Coppola', year: 1979, runtime: 153,
-    genres: ['Drama', 'War'], synopsis: 'A Vietnam War captain travels upriver into Cambodia to assassinate a rogue colonel gone mad in the jungle.',
-    imdbRating: 8.4, imdbVotes: 700000, budget: 31000000 },
-  { title: 'Alien', director: 'Ridley Scott', year: 1979, runtime: 117,
-    genres: ['Horror', 'Sci-Fi'], synopsis: 'The crew of a commercial spacecraft encounter a deadly lifeform after investigating an unknown transmission.',
-    imdbRating: 8.5, imdbVotes: 950000, budget: 11000000 },
-  { title: 'The Thing', director: 'John Carpenter', year: 1982, runtime: 109,
-    genres: ['Horror', 'Sci-Fi'], synopsis: 'An Antarctic research team discovers a parasitic alien that perfectly imitates its victims.',
-    imdbRating: 8.2, imdbVotes: 475000, budget: 15000000 },
-  { title: 'Taxi Driver', director: 'Martin Scorsese', year: 1976, runtime: 114,
-    genres: ['Crime', 'Drama'], synopsis: 'A lonely Vietnam veteran drives nights through a decaying New York and fixates on saving a young prostitute.',
-    imdbRating: 8.2, imdbVotes: 900000, budget: 1300000 },
-  { title: 'Mad Max: Fury Road', director: 'George Miller', year: 2015, runtime: 120,
-    genres: ['Action'], synopsis: 'In a post-apocalyptic wasteland, a warrior woman flees a tyrant across the desert with his wives.',
-    imdbRating: 8.1, imdbVotes: 1100000, budget: 150000000 },
-  { title: 'Burning', director: 'Lee Chang-dong', year: 2018, runtime: 148,
-    genres: ['Drama', 'Mystery'], synopsis: 'A young deliveryman reconnects with a childhood friend, then meets her unsettling new boyfriend.',
-    imdbRating: 7.5, imdbVotes: 90000, budget: 6000000 },
-  { title: 'First Reformed', director: 'Paul Schrader', year: 2017, runtime: 113,
-    genres: ['Drama'], synopsis: 'A small-town pastor in spiritual crisis becomes radicalized by a parishioner\'s despair over climate collapse.',
-    imdbRating: 7.1, imdbVotes: 70000, budget: 3500000 },
-  { title: 'The Social Network', director: 'David Fincher', year: 2010, runtime: 120,
-    genres: ['Drama'], synopsis: 'The origin of Facebook, told through a lawsuit between its founders and the people they left behind.',
-    imdbRating: 7.8, imdbVotes: 820000, budget: 40000000 },
-];
-
 const DEFAULT_SERVICES = [
   'Netflix', 'Max', 'Hulu', 'Prime Video', 'Disney+',
   'Apple TV+', 'Paramount+', 'Peacock', 'Starz', 'MGM+', 'AMC+',
@@ -400,12 +271,7 @@ async function enrichFilm(title, yearHint) {
 }
 
 async function generateDiscover({ filters, services, page = 1 }) {
-  try {
-    return await generateDiscoverFromTMDB({ filters, services, page });
-  } catch (e) {
-    console.warn('[generateDiscover] TMDB unreachable, using local catalog:', e.message);
-    return { films: generateDiscoverFromCatalog({ filters }), page: 1, totalPages: 1 };
-  }
+  return await generateDiscoverFromTMDB({ filters, services, page });
 }
 
 async function generateDiscoverFromTMDB({ filters, services, page = 1 }) {
@@ -475,47 +341,6 @@ async function generateDiscoverFromTMDB({ filters, services, page = 1 }) {
     page: data.page || page,
     totalPages: Math.min(data.total_pages || 1, 500), // TMDB caps at 500
   };
-}
-
-function generateDiscoverFromCatalog({ filters }) {
-  const yMin = filters.yearMin;
-  const yMax = filters.yearMax;
-  const rMin = filters.ratingMin;
-  const vMin = filters.votesMin;
-  const runtimeMax = filters.runtimeMax;
-  const budgetTier = filters.budgetTier;
-  const genreSet = new Set(filters.genres);
-  const moodLower = (filters.mood || '').trim().toLowerCase();
-
-  function matchBudget(b) {
-    if (!budgetTier) return true;
-    if (b == null) return false;
-    if (budgetTier === 'indie') return b < 10_000_000;
-    if (budgetTier === 'mid') return b >= 10_000_000 && b < 50_000_000;
-    if (budgetTier === 'tentpole') return b >= 50_000_000 && b < 150_000_000;
-    if (budgetTier === 'blockbuster') return b >= 150_000_000;
-    return true;
-  }
-
-  let films = FILM_CATALOG.filter(f => {
-    if (f.year < yMin || f.year > yMax) return false;
-    if (f.imdbRating < rMin) return false;
-    if (f.imdbVotes < vMin) return false;
-    if (runtimeMax && f.runtime > runtimeMax) return false;
-    if (!matchBudget(f.budget)) return false;
-    if (genreSet.size && !f.genres.some(g => genreSet.has(g))) return false;
-    if (moodLower) {
-      const hay = `${f.title} ${f.synopsis} ${f.director} ${f.genres.join(' ')}`.toLowerCase();
-      if (!hay.includes(moodLower)) return false;
-    }
-    return true;
-  });
-
-  films.sort((a, b) =>
-    (b.imdbRating - a.imdbRating) || (b.imdbVotes - a.imdbVotes)
-  );
-
-  return films.slice(0, 30);
 }
 
 /* ============================================================================
@@ -1450,7 +1275,7 @@ function DiscoverView({ filters, setFilters, services, setServices, discover, se
         setError('No films match these filters. Try broadening.');
         setDiscover({ films: [], page: 1, totalPages: 1, generatedAt: Date.now() });
       } else {
-        const withIds = films.map(f => ({ ...f, id: mkId(), source: 'catalog' }));
+        const withIds = films.map(f => ({ ...f, id: mkId(), source: 'suggestion' }));
         setDiscover({ films: withIds, page, totalPages, generatedAt: Date.now() });
       }
     } catch (e) {
@@ -1472,7 +1297,7 @@ function DiscoverView({ filters, setFilters, services, setServices, discover, se
       const { films, page, totalPages: tp } = await generateDiscover({
         filters, services, page: curPage + 1,
       });
-      const withIds = films.map(f => ({ ...f, id: mkId(), source: 'catalog' }));
+      const withIds = films.map(f => ({ ...f, id: mkId(), source: 'suggestion' }));
       setDiscover(prev => {
         if (!prev) return prev;
         // Dedupe by tmdbId (fallback to title+year)
