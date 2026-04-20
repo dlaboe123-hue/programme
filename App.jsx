@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Plus, Check, Sparkles, Trash2, X, Star, Tv,
   Loader2, RefreshCw, SlidersHorizontal, Search,
@@ -202,9 +202,11 @@ const BUDGET_TIERS = [
   { id: 'blockbuster', label: 'Blockbuster', range: '$150M+' },
 ];
 
-const DIST_OPTIONS = [
-  { id: 'polarized', label: 'Polarized', hint: 'fat tails' },
-  { id: 'consensus', label: 'Consensus', hint: 'narrow peak' },
+const RECEPTION_OPTIONS = [
+  { id: 'universal', label: 'Universal acclaim', sub: 'rating 8.0+' },
+  { id: 'polarized', label: 'Polarized',         sub: 'loved and loathed' },
+  { id: 'cult',      label: 'Cult favorite',      sub: 'strong rating, smaller audience' },
+  { id: 'overlooked', label: 'Overlooked',        sub: 'high rating, low votes' },
 ];
 
 const DEFAULT_FILTERS = {
@@ -215,6 +217,7 @@ const DEFAULT_FILTERS = {
   votesMin: 1000,
   runtimeMax: null,
   budgetTier: null,
+  reception: null,
   mood: '',
   includeRentals: false,
 };
@@ -272,99 +275,6 @@ async function saveKey(key, value) {
 }
 
 /* ============================================================================
-   Claude API
-   ============================================================================ */
-
-function stripJSON(text) {
-  if (!text) throw new Error('empty response');
-  let s = text.replace(/```json\s*/g, '').replace(/```/g, '').trim();
-
-  const aStart = s.indexOf('[');
-  const oStart = s.indexOf('{');
-  const start = (aStart !== -1 && (oStart === -1 || aStart < oStart)) ? aStart : oStart;
-  if (start === -1) throw new Error('no json in response');
-  const endChar = s[start] === '[' ? ']' : '}';
-  const end = s.lastIndexOf(endChar);
-  if (end === -1) throw new Error('no json close');
-
-  let slice = s.slice(start, end + 1);
-  try {
-    return JSON.parse(slice);
-  } catch (e1) {
-    // Second attempt: strip common garbage (trailing commas, stray backticks)
-    const cleaned = slice
-      .replace(/,(\s*[\]}])/g, '$1')       // trailing commas
-      .replace(/\/\/[^\n]*/g, '')          // line comments
-      .replace(/\/\*[\s\S]*?\*\//g, '');   // block comments
-    try {
-      return JSON.parse(cleaned);
-    } catch (e2) {
-      console.error('JSON parse failed. First 400 chars:', slice.slice(0, 400));
-      throw new Error('malformed JSON from model');
-    }
-  }
-}
-
-async function callClaude({ prompt, useWebSearch = false, maxTokens = 1000 }) {
-  const body = {
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: maxTokens,
-    messages: [{ role: 'user', content: prompt }],
-  };
-  if (useWebSearch) body.tools = [{ type: 'web_search_20250305', name: 'web_search' }];
-
-  let res;
-  try {
-    res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-  } catch (e) {
-    console.error('[callClaude] fetch threw:', e);
-    throw new Error(`Network error: ${e.message || 'unreachable'}`);
-  }
-
-  if (!res.ok) {
-    let detail = '';
-    try { detail = (await res.text()).slice(0, 300); } catch {}
-    console.error(`[callClaude] HTTP ${res.status}:`, detail);
-    throw new Error(`API ${res.status}${detail ? ': ' + detail : ''}`);
-  }
-
-  let data;
-  try {
-    data = await res.json();
-  } catch (e) {
-    console.error('[callClaude] response was not JSON:', e);
-    throw new Error('Response was not JSON');
-  }
-
-  console.log('[callClaude] response:', data);
-
-  if (data?.error) {
-    throw new Error(`API error: ${data.error.message || JSON.stringify(data.error)}`);
-  }
-
-  if (!Array.isArray(data?.content)) {
-    console.error('[callClaude] no content array:', data);
-    throw new Error('Response had no content array');
-  }
-
-  const text = data.content
-    .filter(b => b?.type === 'text')
-    .map(b => b.text || '')
-    .join('\n');
-
-  if (!text.trim()) {
-    const types = data.content.map(b => b?.type).join(', ');
-    console.error('[callClaude] no text in content. Block types:', types);
-    throw new Error(`No text in response (blocks: ${types || 'none'})`);
-  }
-
-  return text;
-}
-
 /* ============================================================================
    TMDB helpers
    ============================================================================ */
@@ -489,7 +399,85 @@ async function enrichFilm(title, yearHint) {
   };
 }
 
-async function generateDiscover({ filters }) {
+async function generateDiscover({ filters, services, page = 1 }) {
+  try {
+    return await generateDiscoverFromTMDB({ filters, services, page });
+  } catch (e) {
+    console.warn('[generateDiscover] TMDB unreachable, using local catalog:', e.message);
+    return { films: generateDiscoverFromCatalog({ filters }), page: 1, totalPages: 1 };
+  }
+}
+
+async function generateDiscoverFromTMDB({ filters, services, page = 1 }) {
+  const genreIds = filters.genres
+    .map(g => TMDB_GENRE_IDS[g])
+    .filter(Boolean)
+    .join(',');
+
+  const providerIds = (services || DEFAULT_SERVICES)
+    .map(s => PROVIDER_IDS[s])
+    .filter(Boolean)
+    .join('|');
+
+  const monetization = filters.includeRentals ? 'flatrate|rent|buy' : 'flatrate';
+
+  const params = {
+    language: 'en-US',
+    region: 'US',
+    sort_by: 'vote_average.desc',
+    include_adult: 'false',
+    include_video: 'false',
+    page,
+    'vote_count.gte': filters.votesMin,
+    'vote_average.gte': filters.ratingMin,
+    'primary_release_date.gte': filters.yearMin + '-01-01',
+    'primary_release_date.lte': filters.yearMax + '-12-31',
+    watch_region: 'US',
+    with_watch_monetization_types: monetization,
+  };
+  if (genreIds) params.with_genres = genreIds;
+  if (providerIds) params.with_watch_providers = providerIds;
+  if (filters.runtimeMax) params['with_runtime.lte'] = filters.runtimeMax;
+
+  // Reception overrides rating/vote defaults with more specific constraints
+  if (filters.reception === 'universal') {
+    params['vote_average.gte'] = Math.max(8.0, filters.ratingMin);
+    params['vote_count.gte'] = Math.max(5000, filters.votesMin);
+  } else if (filters.reception === 'polarized') {
+    // People engaged but split: lots of votes, middling average
+    params['vote_average.gte'] = 5.5;
+    params['vote_average.lte'] = 7.2;
+    params['vote_count.gte'] = Math.max(30000, filters.votesMin);
+    params.sort_by = 'vote_count.desc';
+  } else if (filters.reception === 'cult') {
+    // High regard but smaller audience
+    params['vote_average.gte'] = Math.max(7.0, filters.ratingMin);
+    params['vote_count.lte'] = 30000;
+    params['vote_count.gte'] = Math.max(1000, filters.votesMin);
+  } else if (filters.reception === 'overlooked') {
+    params['vote_average.gte'] = Math.max(7.5, filters.ratingMin);
+    params['vote_count.lte'] = 15000;
+    params['vote_count.gte'] = Math.max(500, filters.votesMin);
+  }
+
+  if (filters.mood?.trim()) {
+    try {
+      const kwId = await moodToKeywordId(filters.mood);
+      if (kwId) params.with_keywords = kwId;
+    } catch {}
+  }
+
+  const data = await tmdbFetch('/discover/movie', params);
+  const results = (data.results || []).map(tmdbResultToFilm);
+  if (!results.length && page === 1) throw new Error('No TMDB matches');
+  return {
+    films: results,
+    page: data.page || page,
+    totalPages: Math.min(data.total_pages || 1, 500), // TMDB caps at 500
+  };
+}
+
+function generateDiscoverFromCatalog({ filters }) {
   const yMin = filters.yearMin;
   const yMax = filters.yearMax;
   const rMin = filters.ratingMin;
@@ -530,20 +518,114 @@ async function generateDiscover({ filters }) {
   return films.slice(0, 30);
 }
 
-async function pickForTonight({ watchlist, prompt }) {
-  const userPrompt = `Two cinephiles picking for tonight. Their prompt: "${prompt}"
+/* ============================================================================
+   Tonight picker — local scoring heuristic. No external API.
+   Scores watchlist films against the prompt + base quality signals,
+   picks top result, builds a rationale from film attributes.
+   ============================================================================ */
 
-Watchlist:
-${watchlist.map(f => `- "${f.title}" (${f.director || '?'}, ${f.year || '?'}, ${f.runtime || '?'}min) genres: ${(f.genres||[]).join(', ')}${f.why ? ` note: "${f.why}"` : ''}`).join('\n')}
+function pickForTonight({ watchlist, prompt }) {
+  if (!watchlist?.length) throw new Error('No films on your programme yet');
 
-Return ONLY JSON (no fences):
-{
-  "pickTitle": "exact title from list",
-  "rationale": "2-3 sentences, specific, no pandering",
-  "alternates": [{"title":"...","why":"one phrase"}, {"title":"...","why":"one phrase"}]
-}`;
-  const text = await callClaude({ prompt: userPrompt, useWebSearch: false });
-  return stripJSON(text);
+  const p = (prompt || '').toLowerCase().trim();
+  const words = p.split(/\s+/).filter(w => w.length > 2);
+
+  const scored = watchlist.map(f => {
+    let score = (f.imdbRating || 7) * 10; // base quality: 70-95
+
+    // "Both wanted it" is a strong signal
+    if (f.addedBy === 'Both') score += 12;
+
+    // Recently added gets a nudge (fresh enthusiasm)
+    if (f.addedAt) {
+      const days = (Date.now() - f.addedAt) / 86400000;
+      if (days < 7) score += 6;
+      else if (days < 30) score += 3;
+    }
+
+    // Prompt keyword matching against all searchable fields
+    if (p) {
+      const hay = `${f.title} ${f.director || ''} ${f.synopsis || ''} ${(f.genres || []).join(' ')} ${f.why || ''}`.toLowerCase();
+      for (const w of words) if (hay.includes(w)) score += 12;
+
+      // Mood shortcuts
+      if (/\b(short|quick|brief|tired|tonight)\b/.test(p) && f.runtime && f.runtime < 110) score += 18;
+      if (/\b(long|epic|immersive|deep)\b/.test(p) && f.runtime && f.runtime > 150) score += 18;
+      if (/\b(funny|fun|light|laugh|comedy)\b/.test(p) && (f.genres || []).includes('Comedy')) score += 22;
+      if (/\b(dark|serious|heavy|intense|bleak)\b/.test(p) && (f.genres || []).some(g => ['Drama','Thriller','Horror','War','Crime'].includes(g))) score += 22;
+      if (/\b(scary|horror|scare)\b/.test(p) && (f.genres || []).includes('Horror')) score += 25;
+      if (/\b(romantic|romance|date)\b/.test(p) && (f.genres || []).includes('Romance')) score += 22;
+      if (/\b(action|thrill)\b/.test(p) && (f.genres || []).some(g => ['Action','Thriller'].includes(g))) score += 20;
+      if (/\b(sci.?fi|science)\b/.test(p) && (f.genres || []).includes('Sci-Fi')) score += 22;
+      if (/\b(new|recent|modern)\b/.test(p) && f.year >= 2020) score += 12;
+      if (/\b(classic|old|vintage)\b/.test(p) && f.year < 2000) score += 12;
+      if (/\b(foreign|subtitle|international)\b/.test(p) && (f.originalLanguage || 'en') !== 'en') score += 18;
+    }
+
+    // Small random jitter so picks aren't deterministic across refreshes
+    score += Math.random() * 6;
+
+    return { film: f, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+
+  const pick = scored[0].film;
+  const alternates = scored.slice(1, 3).map(s => ({
+    title: s.film.title,
+    why: buildAlternateReason(s.film),
+  }));
+
+  return {
+    pickTitle: pick.title,
+    rationale: buildRationale(pick, prompt),
+    alternates,
+  };
+}
+
+function buildRationale(film, prompt) {
+  const parts = [];
+  const p = (prompt || '').toLowerCase();
+
+  // Opening beat based on rating
+  if (film.imdbRating >= 8.5) parts.push(`Heavyweight at ${film.imdbRating.toFixed(1)} on IMDb`);
+  else if (film.imdbRating >= 8.0) parts.push(`Well-regarded at ${film.imdbRating.toFixed(1)}`);
+  else if (film.imdbRating >= 7.0) parts.push(`Solid at ${film.imdbRating.toFixed(1)}`);
+  else parts.push('A distinctive pick');
+
+  // Director/year context
+  if (film.director) parts.push(`${film.director}${film.year ? `, ${film.year}` : ''}`);
+  else if (film.year) parts.push(`${film.year}`);
+
+  // Runtime relevance
+  if (film.runtime) {
+    if (film.runtime < 100) parts.push(`lean at ${formatRuntime(film.runtime)}`);
+    else if (film.runtime > 160) parts.push(`the full ${formatRuntime(film.runtime)} commitment`);
+  }
+
+  // "Both" signal
+  if (film.addedBy === 'Both') parts.push('you both flagged it');
+
+  // Personal note if present
+  if (film.why) parts.push(`your note: "${film.why}"`);
+
+  // Prompt-aware tail
+  if (/\b(short|quick|tonight)\b/.test(p) && film.runtime && film.runtime < 110) {
+    parts.push('fits the "make it quick" brief');
+  } else if (/\b(funny|light)\b/.test(p) && (film.genres || []).includes('Comedy')) {
+    parts.push('matches the mood for something lighter');
+  }
+
+  return parts.join('. ') + '.';
+}
+
+function buildAlternateReason(film) {
+  if (film.addedBy === 'Both') return 'both wanted it';
+  if (film.imdbRating >= 8.5) return `${film.imdbRating.toFixed(1)} on IMDb`;
+  if (film.runtime && film.runtime < 100) return `clean ${formatRuntime(film.runtime)}`;
+  if (film.director) return film.director;
+  if (film.genres?.length) return film.genres[0].toLowerCase();
+  return 'also on the list';
 }
 
 /* ============================================================================
@@ -1028,6 +1110,7 @@ function countActiveFilters(f) {
   if (f.votesMin !== DEFAULT_FILTERS.votesMin) n++;
   if (f.runtimeMax) n++;
   if (f.budgetTier) n++;
+  if (f.reception) n++;
   if (f.includeRentals) n++;
   return n;
 }
@@ -1125,6 +1208,11 @@ function FilterBar({ filters, setFilters, services, onOpenServices, onOpenAdvanc
         {filters.budgetTier && (
           <Chip onRemove={() => setFilters({ ...filters, budgetTier: null })}>
             {BUDGET_TIERS.find(b => b.id === filters.budgetTier)?.label}
+          </Chip>
+        )}
+        {filters.reception && (
+          <Chip onRemove={() => setFilters({ ...filters, reception: null })}>
+            {RECEPTION_OPTIONS.find(r => r.id === filters.reception)?.label}
           </Chip>
         )}
         {filters.includeRentals && (
@@ -1250,6 +1338,22 @@ function FiltersSheet({ filters, setFilters, onClose }) {
           </div>
         </Field>
 
+        <Field label="Reception">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <button onClick={() => setLocal({ ...local, reception: null })}
+              style={{ ...pillStyle(!local.reception), justifyContent: 'flex-start', width: '100%' }}>
+              Any reception
+            </button>
+            {RECEPTION_OPTIONS.map(r => (
+              <button key={r.id} onClick={() => setLocal({ ...local, reception: r.id })}
+                style={{ ...pillStyle(local.reception === r.id), justifyContent: 'space-between', width: '100%' }}>
+                <span>{r.label}</span>
+                <span style={{ opacity: 0.6 }}>{r.sub}</span>
+              </button>
+            ))}
+          </div>
+        </Field>
+
         <Field label="Include rentals / purchases">
           <button onClick={() => setLocal({ ...local, includeRentals: !local.includeRentals })} style={{
             ...pillStyle(local.includeRentals), width: '100%', justifyContent: 'space-between',
@@ -1331,27 +1435,62 @@ function ServicesSheet({ services, setServices, onClose }) {
 function DiscoverView({ filters, setFilters, services, setServices, discover, setDiscover,
                         watchlist, seen, onOpenFilm, getFlagState, onToggleFlag }) {
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [servicesOpen, setServicesOpen] = useState(false);
   const [autoTried, setAutoTried] = useState(false);
 
+  // Reset pagination + load page 1
   async function run() {
     setLoading(true); setError('');
     try {
-      const films = await generateDiscover({ filters });
+      const { films, page, totalPages } = await generateDiscover({ filters, services, page: 1 });
       if (!films.length) {
         setError('No films match these filters. Try broadening.');
-        setDiscover({ films: [], generatedAt: Date.now() });
+        setDiscover({ films: [], page: 1, totalPages: 1, generatedAt: Date.now() });
       } else {
         const withIds = films.map(f => ({ ...f, id: mkId(), source: 'catalog' }));
-        setDiscover({ films: withIds, generatedAt: Date.now() });
+        setDiscover({ films: withIds, page, totalPages, generatedAt: Date.now() });
       }
     } catch (e) {
       console.error('Discover failed:', e);
       setError(e.message || 'Something went wrong');
     }
     setLoading(false);
+  }
+
+  // Append next page
+  async function loadMore() {
+    if (loadingMore || loading) return;
+    const curPage = discover?.page || 1;
+    const totalPages = discover?.totalPages || 1;
+    if (curPage >= totalPages) return;
+
+    setLoadingMore(true);
+    try {
+      const { films, page, totalPages: tp } = await generateDiscover({
+        filters, services, page: curPage + 1,
+      });
+      const withIds = films.map(f => ({ ...f, id: mkId(), source: 'catalog' }));
+      setDiscover(prev => {
+        if (!prev) return prev;
+        // Dedupe by tmdbId (fallback to title+year)
+        const seen = new Set(
+          prev.films.map(f => f.tmdbId || `${f.title}::${f.year}`)
+        );
+        const fresh = withIds.filter(f => !seen.has(f.tmdbId || `${f.title}::${f.year}`));
+        return {
+          ...prev,
+          films: [...prev.films, ...fresh],
+          page,
+          totalPages: tp,
+        };
+      });
+    } catch (e) {
+      console.warn('loadMore failed:', e);
+    }
+    setLoadingMore(false);
   }
 
   useEffect(() => {
@@ -1361,14 +1500,30 @@ function DiscoverView({ filters, setFilters, services, setServices, discover, se
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Background poster enrichment via TMDB.
-  // Runs once per film list. Silently no-ops if TMDB is unreachable.
+  // Infinite scroll: IntersectionObserver on a sentinel below the grid
+  const sentinelRef = useRef(null);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    if (!discover?.films?.length) return;
+    const curPage = discover?.page || 1;
+    const totalPages = discover?.totalPages || 1;
+    if (curPage >= totalPages) return;
+
+    const observer = new IntersectionObserver(entries => {
+      if (entries[0]?.isIntersecting) loadMore();
+    }, { rootMargin: '400px' });
+    observer.observe(el);
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [discover?.films?.length, discover?.page, discover?.totalPages, loadingMore]);
+
+  // Background poster enrichment via TMDB — only runs for films missing posters
   useEffect(() => {
     const films = discover?.films || [];
     const needPosters = films.filter(f => !f.posterUrl && !f._posterTried);
     if (!needPosters.length) return;
 
-    // Mark attempted to prevent re-firing on re-renders
     setDiscover(prev => prev ? ({
       ...prev,
       films: prev.films.map(f =>
@@ -1376,7 +1531,6 @@ function DiscoverView({ filters, setFilters, services, setServices, discover, se
       ),
     }) : prev);
 
-    // Stagger fetches (10/s) to stay under TMDB's 40/10s limit
     needPosters.forEach((film, i) => {
       setTimeout(async () => {
         try {
@@ -1396,7 +1550,7 @@ function DiscoverView({ filters, setFilters, services, setServices, discover, se
             ),
           }) : prev);
         } catch (e) {
-          // Silent fail — gradient fallback stays
+          // Silent fail
         }
       }, i * 100);
     });
@@ -1404,6 +1558,7 @@ function DiscoverView({ filters, setFilters, services, setServices, discover, se
   }, [discover?.films?.length]);
 
   const films = discover?.films || [];
+  const hasMore = (discover?.page || 1) < (discover?.totalPages || 1);
 
   return (
     <div>
@@ -1468,7 +1623,7 @@ function DiscoverView({ filters, setFilters, services, setServices, discover, se
             fontFamily: FONT.mono, fontSize: 10, color: C.textFaint,
             letterSpacing: '0.12em', display: 'flex', justifyContent: 'space-between',
           }}>
-            <span>{films.length} FILMS</span>
+            <span>{films.length} FILMS{hasMore ? '+' : ''}</span>
             {discover?.generatedAt && (
               <span>{new Date(discover.generatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
             )}
@@ -1487,6 +1642,30 @@ function DiscoverView({ filters, setFilters, services, setServices, discover, se
               />
             ))}
           </div>
+
+          {/* Infinite scroll sentinel + loading indicator */}
+          {hasMore && (
+            <div ref={sentinelRef} style={{
+              padding: '20px', textAlign: 'center',
+              fontFamily: FONT.mono, fontSize: 10, color: C.textFaint,
+              letterSpacing: '0.15em', textTransform: 'uppercase',
+            }}>
+              {loadingMore ? (
+                <><Loader2 size={14} className="spin" style={{ verticalAlign: 'middle', marginRight: 6, color: C.accent }} /> Loading more</>
+              ) : (
+                <span style={{ opacity: 0.5 }}>Scroll for more</span>
+              )}
+            </div>
+          )}
+          {!hasMore && films.length > 20 && (
+            <div style={{
+              padding: '20px 20px 40px', textAlign: 'center',
+              fontFamily: FONT.mono, fontSize: 10, color: C.textFaint,
+              letterSpacing: '0.15em', textTransform: 'uppercase', opacity: 0.5,
+            }}>
+              End of catalog
+            </div>
+          )}
         </>
       )}
 
